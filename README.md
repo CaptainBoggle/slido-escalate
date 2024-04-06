@@ -1,4 +1,4 @@
-# Slido Me First
+# Slido Escalate
 
 A simple voting bot for the audience interaction tool Slido (sli.do) made in Python. Vote for your question as often as you like. Modified from davidlhw/slido-me-first to deal with changes made to the api, as well as to add the ability to vote for multiple questions at once, and vote for pre-existing questions, rather than creating new ones.
 
