@@ -31,13 +31,14 @@ class SlidoService:
         self.event_section_id: str = None
         self.question_ids: list = None
 
-    def __post(self, url: str, json: dict = None, headers: dict = None) -> Optional[dict]:
-        response = requests.post(url, json=json, headers=headers)
+    def __post(self, url: str, json: dict = None, headers: dict = None, cookies: dict = None) -> Optional[dict]:
+        response = requests.post(url, json=json, headers=headers, cookies=cookies)
         result = None
         log(
             f'POST "{url.replace(settings.API, "")}" - {response.status_code}\n'
             f'Request json: {json}\n'
             f'Request headers: {headers}\n'
+            f'Request cookies: {cookies}\n'
         )
         try:
             response.raise_for_status()
@@ -72,7 +73,7 @@ class SlidoService:
         event_hash = url.split('/event/')[1]
         if '/' in event_hash:
             event_hash = event_hash.split('/')[0]
-
+        print(f'Event Hash: {event_hash}')
         return event_hash
 
     def _get_uuid_from_event_hash(self, event_hash: str) -> str:
@@ -80,23 +81,12 @@ class SlidoService:
         params = dict(hash=event_hash)
         result = self.__get(url, params=params)
 
-        # is_active = result.get('is_active', False)
-        # if not is_active:
-        #     raise Exception
-
-        # is_complete = result.get('is_complete', False)
-        # if is_complete:
-        #     raise Exception
-
-        # is_deleted = result.get('is_deleted', False)
-        # if is_deleted:
-        #     raise Exception
-
         uuid = result.get('uuid', None)
         if uuid is None:
             raise Exception
 
         self.uuid = uuid
+        print(f'UUID: {uuid}')
         return uuid
 
     def _get_access_token(self) -> str:
@@ -178,12 +168,12 @@ class SlidoService:
 
         return result
 
-    def vote_question(
+    def vote_questions(
         self,
-        question_id: str,
+        question_list: list,
         vote_count: int,
         retry_count: int = 3,
-        random_sleep_duration: int = 3
+        random_sleep_duration: int = 2
     ) -> None:
         uuid = self.uuid
         if uuid is None:
@@ -194,26 +184,34 @@ class SlidoService:
         if access_token is None:
             access_token, headers = self._get_access_token()
 
-        url = f"{settings.API}/events/{uuid}/questions/{question_id}/like"
-        data = {"score": 1}
 
+        #question_list = ['84261034','84261027','84261016', '84260998','84260981','84260958','84260953','84260946','84260907','84260882','84140435','84117351','84261022']
         for i in range(vote_count):
             log(f'Executing vote {i}')
-            sleep(randint(1, random_sleep_duration))  # to bypass rate limiter
+            sleep(randint(2, random_sleep_duration))  # to bypass rate limiter
             access_token, headers = self._get_access_token()
-            sleep(randint(1, random_sleep_duration))  # to bypass rate limiter
+            sleep(randint(2, random_sleep_duration))  # to bypass rate limiter
 
             headers = dict(authorization=f"Bearer {access_token}")
             headers.update(settings.get_headers())
 
-            while retry_count > 0:
-                result = self.__post(url, headers=headers, json=data)
-                sleep(randint(1, random_sleep_duration))  # to bypass rate limiter
-                if result is None:
-                    sleep(randint(1, random_sleep_duration))  # to bypass rate limiter
-                    retry_count -= 1
-                    continue
-                break
+
+            for question_id in question_list:
+                retry_count = 3
+                url = f"{settings.API}/events/{uuid}/questions/{question_id}/like"
+                data = {"score": 1}
+                cookie = {"Slido.EventAuthTokens": "{uuid},{access_token}"}
+
+                while retry_count > 0:
+                    result = self.__post(url, headers=headers, json=data, cookies=cookie)
+                    sleep(1+ (0.1*randint(1, 5)))  # to bypass rate limiter
+                    if result is None:
+                        print(f'Failed to vote for question {question_id}, retrying...')
+                        sleep(1+ (0.1*randint(1, 5)))  # to bypass rate limiter
+                        retry_count -= 1
+                        continue
+                    print(f'Voted for question {question_id}')
+                    break
 
 
 # Instantiate the parser
@@ -221,10 +219,10 @@ def setup_parsers() -> ArgumentParser:
     parser = ArgumentParser(description='A Simple Slido Voter Bot')
     parser.add_argument('-u', metavar='<url>', nargs=1,
                         required=True, help='url for event')
-    parser.add_argument('-q', metavar='<question>', nargs=1, type=str,
-                        required=True, help='question to raise')
     parser.add_argument('-v', metavar='<vote count>', nargs=1, type=int,
-                        required=True, help='number of votes to add')
+                        required=True, help='number of votes to add to each question')
+    parser.add_argument('-q', metavar='<question list>', nargs='+',
+                        required=True, help='list of question ids to vote for (space separated)')
     return parser
 
 
@@ -232,19 +230,16 @@ def main():
     parser = setup_parsers()
     args = parser.parse_args()
     slido_url = args.u[0]
-    question = args.q[0]
     vote_count = int(args.v[0])
-
+    question_list = args.q
+    print(f'Question List: {question_list}')
+    
     slido_service = SlidoService(slido_url)
-
-    question_result = slido_service.ask_question(question)
-    event_question_id = question_result.get('event_question_id')
     from time import time
     start = time()
-    slido_service.vote_question(event_question_id, vote_count)
+    slido_service.vote_questions(question_list, vote_count)
     duration = time() - start
     print(f'TOTAL TIME TAKEN: {round(duration, 2)}s')
-    print(f'AVERAGE TIME PER VOTE: {round(duration / vote_count, 2)}s')
 
 
 if __name__ == '__main__':
